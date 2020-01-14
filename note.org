@@ -18,7 +18,7 @@
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-   cmake --build . [--target install]        // [...] 代表可选内容
+   cmake --build . [--target install]        // [...] optional
 
    vim test1.cc
    g++ test1.cc -o test1 -I./lib/ -lleveldb
