@@ -66,6 +66,7 @@ typedef uint64_t SequenceNumber;
 // can be packed together into 64-bits.
 static const SequenceNumber kMaxSequenceNumber = ((0x1ull << 56) - 1);
 
+// internal key三元素：user_key, sequence, type
 struct ParsedInternalKey {
   Slice user_key;
   SequenceNumber sequence;
@@ -106,6 +107,10 @@ class InternalKeyComparator : public Comparator {
  public:
   explicit InternalKeyComparator(const Comparator* c) : user_comparator_(c) {}
   const char* Name() const override;
+
+  // 从slice里解析出userkey，与8字节的tag:(sequence << 8) | type
+  // userkey按照字母序比较
+  // 如果userkey相同，则tag按大小逆序比较，即sequence越大越靠前
   int Compare(const Slice& a, const Slice& b) const override;
   void FindShortestSeparator(std::string* start,
                              const Slice& limit) const override;
@@ -203,15 +208,16 @@ class LookupKey {
 
  private:
   // We construct a char array of the form:
-  //    klength  varint32               <-- start_
-  //    userkey  char[klength]          <-- kstart_
-  //    tag      uint64
-  //                                    <-- end_
+  //    klength               varint32               <-- start_
+  //    userkey               char[klength]          <-- kstart_
+  //    tag(Seq+ValueType)    uint64
+  //                                                 <-- end_
   // The array is a suitable MemTable key.
   // The suffix starting with "userkey" can be used as an InternalKey.
   const char* start_;
   const char* kstart_;
   const char* end_;
+  // 为了避免内存碎片 or 提高性能？  @TODO 应该是SSO
   char space_[200];  // Avoid allocation for short keys
 };
 

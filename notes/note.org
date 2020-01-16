@@ -1,0 +1,73 @@
+* 编译 & 使用
+** ref
+1. https://github.com/google/leveldb/README.md
+2. https://izualzhy.cn/tags.html#leveldb 详细(作者baidu)
+3. http://mingxinglai.com/cn/2015/08/gdb-leveldb/ leveldb 编译调试(如何阅读开源项目 赖明星)
+   http://qianli.site/2019/06/29/leveldb-code-reading1/ cmake编译安装(2019 1.22版)
+4. codedump博客 https://www.codedump.info/post/20190215-leveldb/
+5. 源码分析的帖子有很多 有帮助理解就可以 
+  https://sf-zhou.github.io/#/LevelDB
+  leveldb性能分析 https://www.cnblogs.com/bethal/p/5257029.html
+** practice
+
+0. 动态库 和 静态库
+   https://www.jianshu.com/p/8392acf7c9db
+   很早版本leveldb 需要手动拷贝头文件和动态库
+
+#+BEGIN_SRC sh
+ls leveldb/out-shared/libleveldb.so.1.20
+ls leveldb/out-static/libleveldb.a
+
+# cp leveldb header file
+sudo cp -r /leveldb/include/ /usr/include/
+
+# cp lib to /usr/lib/
+sudo cp /leveldb/out-shared/libleveldb.so.1.20 /usr/lib/
+
+# create link
+sudo ln -s /usr/lib/libleveldb.so.1.20 /usr/lib/libleveldb.so.1
+sudo ln -s /usr/lib/libleveldb.so.1.20 /usr/lib/libleveldb.so
+
+# update lib cache
+sudo ldconfig
+
+# 测试
+# 将静态库拷贝到测试代码的目录
+cp leveldb/out-static/libleveldb.a ./
+g++ hello_leveldb.cc -o hello_leveldb ./libleveldb.a -lpthread
+
+# 动态链接
+g++ hello_leveldb.cc -o hello_leveldb -lpthread -lleveldb
+
+#+END_SRC
+
+1. git clone --recurse-submodules https://github.com/google/leveldb.git
+   需要安装benchmark 用到的软件
+   - clang/
+   - gperftool /gtest gmock tcmalloc
+   - snappy /compress
+   - ninja /cmake 
+   - crc32c /校验和
+   - kyotocabinet /benchmark
+   - sqlite3
+2. mkdir -p build && cd build
+   cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX=$HOME/ws/test_leveldb \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+   cmake --build . [--target install]        // [...] optional
+
+   vim test1.cc
+   g++ test1.cc -o test1 -I./lib/ -lleveldb
+3. CMakeLists.txt
+   L337 leveldb_test(可以添加一些自定义的测试文件 -- 可以利用leveldb源码)
+   target_link_libraries  可以代表有些第三方库需要安装(往往是动态库)
+
+
+4. 之前版本 使用make进行编译((如何将程序动态连接到gperftool))
+
+@TODO 如何找到需要预安装的软件+cmake编译选项
+** progress
+1. 看完memtable

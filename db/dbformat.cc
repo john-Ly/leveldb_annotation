@@ -117,6 +117,7 @@ bool InternalFilterPolicy::KeyMayMatch(const Slice& key, const Slice& f) const {
 
 LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   size_t usize = user_key.size();
+  // SequenceNumber + ValueType占8个字节，encode(internal_key_size)至多占5个字节，因此预估至多+13个字节
   size_t needed = usize + 13;  // A conservative estimate
   char* dst;
   if (needed <= sizeof(space_)) {
@@ -129,6 +130,7 @@ LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   kstart_ = dst;
   memcpy(dst, user_key.data(), usize);
   dst += usize;
+  // EncodeFixed64如果是小端，则直接内存 copy；如果是大端，则反向 copy，固定占用8bytes
   EncodeFixed64(dst, PackSequenceAndType(s, kValueTypeForSeek));
   dst += 8;
   end_ = dst;

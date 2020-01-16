@@ -27,6 +27,9 @@ static const int kMaxRecordType = kLastType;
 static const int kBlockSize = 32768;
 
 // Header is checksum (4 bytes), length (2 bytes), type (1 byte).
+// Block = (1/n)chunk
+// 2个字节的长度： 大于KBlockSize = 32KB
+// 其中length最大为kBlockSize=0x8000 - kHeaderSize，因此只使用2个字节存储
 static const int kHeaderSize = 4 + 2 + 1;
 
 }  // namespace log

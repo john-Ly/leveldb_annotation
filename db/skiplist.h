@@ -38,6 +38,10 @@ namespace leveldb {
 
 class Arena;
 
+//Comparator.operator(lh, rh)返回值说明:
+//lh < rh，返回-1
+//lh > rh，返回+1
+//lh = rh，返回0
 template <typename Key, class Comparator>
 class SkipList {
  private:
@@ -52,6 +56,7 @@ class SkipList {
   SkipList(const SkipList&) = delete;
   SkipList& operator=(const SkipList&) = delete;
 
+  // 不支持显示delete
   // Insert key into the list.
   // REQUIRES: nothing that compares equal to key is currently in the list.
   void Insert(const Key& key);
@@ -163,6 +168,8 @@ struct SkipList<Key, Comparator>::Node {
     next_[n].store(x, std::memory_order_release);
   }
 
+  // @TODO 原子操作 无锁链表
+  // leveldb 中的场景只有一句 store(memory_order_release) 所以先发布在获取
   // No-barrier variants that can be safely used in a few locations.
   Node* NoBarrier_Next(int n) {
     assert(n >= 0);
@@ -175,9 +182,16 @@ struct SkipList<Key, Comparator>::Node {
 
  private:
   // Array of length equal to the node height.  next_[0] is lowest level link.
+  // 作为Node的最后一个成员变量
+  // 由于Node通过placement new的方式构造，因此next_实际上是一个不定长的数组
+  // 数组长度即该节点的高度
+  // next_记录了该节点在所有层的后继节点，0是最底层链表(0层默认存在)  -- 类似单链表的next 不过有多个层
+  // http://kevinlq.com/2017/08/16/C_C++_flexible_array/ 变长数组
+  // https://blog.csdn.net/loophome/article/details/68940606
   std::atomic<Node*> next_[1];
 };
 
+// NewNode创建新的Node节点后 需要对可能的层级设置nullptr(参考SkipList ctor)
 template <typename Key, class Comparator>
 typename SkipList<Key, Comparator>::Node* SkipList<Key, Comparator>::NewNode(
     const Key& key, int height) {
@@ -243,6 +257,7 @@ int SkipList<Key, Comparator>::RandomHeight() {
   // Increase height with probability 1 in kBranching
   static const unsigned int kBranching = 4;
   int height = 1;
+  // 1/4概率继续增加height (1/4概率在第一层 1/16概率在第二层 ...)
   while (height < kMaxHeight && ((rnd_.Next() % kBranching) == 0)) {
     height++;
   }
@@ -263,13 +278,15 @@ SkipList<Key, Comparator>::FindGreaterOrEqual(const Key& key,
                                               Node** prev) const {
   Node* x = head_;
   int level = GetMaxHeight() - 1;
+  // 每次搜索: head相当于起始情况, 比较(next->key, key的大小 用下一个节点的值来判断是否 在当前层链表前进)
   while (true) {
     Node* next = x->Next(level);
-    if (KeyIsAfterNode(key, next)) {
+    if (KeyIsAfterNode(key, next)) { // 如果 next->key < key  --->  在该层 进行搜索
       // Keep searching in this list
       x = next;
-    } else {
-      if (prev != nullptr) prev[level] = x;
+    } else { // 如果next->key >= key
+      // notes:如果单纯为了判断是否相等，这里可以加一个判断直接返回了，没必>要level--到0再返回，不过复杂度没有变化
+      if (prev != nullptr) prev[level] = x; // prev记录该level最后一个<key的节点
       if (level == 0) {
         return next;
       } else {
@@ -280,6 +297,7 @@ SkipList<Key, Comparator>::FindGreaterOrEqual(const Key& key,
   }
 }
 
+// 查找最后一个小于 key的 Node*
 template <typename Key, class Comparator>
 typename SkipList<Key, Comparator>::Node*
 SkipList<Key, Comparator>::FindLessThan(const Key& key) const {
@@ -345,7 +363,7 @@ void SkipList<Key, Comparator>::Insert(const Key& key) {
 
   int height = RandomHeight();
   if (height > GetMaxHeight()) {
-    for (int i = GetMaxHeight(); i < height; i++) {
+    for (int i = GetMaxHeight(); i < height; i++) {  // 更新超过当前 MaxHeight的 prev[*] 指针为 dummy_head
       prev[i] = head_;
     }
     // It is ok to mutate max_height_ without any synchronization
@@ -355,10 +373,21 @@ void SkipList<Key, Comparator>::Insert(const Key& key) {
     // the loop below.  In the former case the reader will
     // immediately drop to the next level since nullptr sorts after all
     // keys.  In the latter case the reader will use the new node.
+    //
+    // 读: 查找是从高层到底层
+    // 写: 从底层往高层更新
+    //
+    // max_height_ 唯一修改的地方
+    // 多读: OK
+    // 多读单写: 因为内存序为 relaxed_order, 所以  R W R(多个读可能有的读到最新的maxHeight 可能读到旧值)
+    //    多读与写 操作不同的key   不太会影响, 只是可能原本读的范围较大; 如果更新了maxHeight_ 可能缩小了查找范围
+    //    多读与写 操作相同的key    读到旧值, 说明插入还没有完成, 本次查找失败(并发系统允许); 读到新值 有Node* atomic 遵循release-acquire 所以线程安全
+    // 多写: 存在竞争关系, 需要锁控制(insert被调用 需要保证同步 @TODO)
     max_height_.store(height, std::memory_order_relaxed);
   }
 
   x = NewNode(key, height);
+  // 低于Height的每一层 插入节点x到prev及prev->next中间; 更新顺序按照底层到高层
   for (int i = 0; i < height; i++) {
     // NoBarrier_SetNext() suffices since we will add a barrier when
     // we publish a pointer to "x" in prev[i].
